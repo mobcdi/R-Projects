@@ -1,0 +1,534 @@
+﻿---
+title: "Twitter - Analysis"
+author: "Michael O'Brien"
+date: "Thursday, July 02, 2015"
+output:
+  word_document:
+    fig_height: 7
+    fig_width: 9
+  html_document:
+    fig_height: 7
+    fig_width: 9
+---
+This document is the basis for analysis but may need to be run in blocks and optimised to reduce duplicate code in the future. Also some non cran packages were used that may need to be replaced or installed from github
+
+```{r, echo=FALSE, warning=FALSE,message=FALSE}
+# Load Libraries and tools needed for session
+library(smappR) #helper package to query the twitter streaming api
+library(twitteR) #to access the twitter rest apic
+library(streamR) #to access the twitter streaming API
+library(dplyr)
+library(qdapRegex) # regex common library for removing hashtags
+library(tm) #text mining library
+library(wordcloud) #used to create wordclouds
+library(reshape2)
+library(igraph)
+library(ggplot2)
+library(knitr)
+```
+
+```{r, echo=FALSE, warning=FALSE,message=FALSE}
+#Assign Variables
+GetTwitterOverView<-TRUE
+GetAllTweets<-FALSE
+
+
+# Values provided by Twitter for my account to use their API   
+api_key <- ""
+api_secret <- ""
+access_token <- ""
+access_secret <- ""
+requestURL <- "https://api.twitter.com/oauth/request_token"
+accessURL <- "https://api.twitter.com/oauth/access_token"
+authURL <- "https://api.twitter.com/oauth/authorize"
+
+#Load up the Twitter Account names
+#@CBLUCC UCC Business and Law
+#@SmurfitSchool UCD Smurfit Business School
+#@dcubs DCU Business School
+#@BusinessAtUL Kemmy Business (But why no mention in the twitter handle [inconsistent use of Kemmy]
+#@NUIGCairnes NUIG Cairnes School of Business
+BusinessSchools <- c("CBLUCC","SmurfitSchool","dcubs","BusinessAtUL","NUIGCairnes")
+
+#Get the default layout so we can reset it later between plots and then reset it using par(par_orig). If you forgot to save the default layout you can hardcode it back using par(mfrow=c(1,1)) and use layout.show(5) to see how 5 plots would appear 
+par_orig = par()
+#ColourValues
+#UCC = #FFB500 is R-G-B 255-181-0
+#SmurfitSchool = #0080FF is R-G-B  0-128-255
+#DCU = #002566 is R-G-B  0-37-102
+#UL = #70193D is R-G-B  112-25-61
+#NUIG = #7EA996 is R-G-B  126.169-150
+
+#Assign Colours to a variable using the official Uni colours where possible
+MyColours <- c("#FFB500","#0080FF","#002566","#70193D","#7EA996")
+#Name the columns after their assoc business institution
+names(MyColours) <-  BusinessSchools
+
+
+# When text mining remove short words that don't add to the dicussion
+AnalysisStopWords <- c("the","for","and","any","our","very","has","this","are","all","out","did","from","with","have","who","take","some","its","here","one","heres","you","your","get","can","their","more","see","just","read","like","first","see","want","how","dont","http…","about")
+#How frequent do words have to appear in texts before they get added to the graph plot
+KeyWordFrequency <-20 
+```
+
+
+
+```{r, echo=FALSE, warning=FALSE,message=FALSE,prompt=FALSE}
+#Get the twitter data once by setting GetTwitterOverview to TRUE to load into the environment at least once or to refresh the data
+if(GetTwitterOverView){
+
+#Set up authentication 
+setup_twitter_oauth(api_key,api_secret,access_token,access_secret)
+
+#Gets alot of useful details about the accounts in general like when they were opened and their twitter image and converts into a dataframe
+BusinessSchoolsTwitterProfiles <- lookupUsers(BusinessSchools)
+BusinessSchoolsTwitterProfilesDF <-twListToDF(BusinessSchoolsTwitterProfiles)  
+}
+
+if (GetAllTweets){
+#Authenticate to twitter for streaming API
+my_oauth <- OAuthFactory$new(consumerKey=api_key,
+                             consumerSecret=api_secret, requestURL=requestURL,
+                             accessURL=accessURL, authURL=authURL)
+#THIS NEEDS TO BE RUN INTERACTIVELY TO COMPLETE THE HANDSHAKE WITH Twitter
+my_oauth$handshake(cainfo = system.file("CurlSSL", "cacert.pem", package = "RCurl"))
+
+save(my_oauth, file="Authentication/my_oauth")
+
+#Save Tweets into JSON files and store in working directory
+BusinessSchoolsTwitterProfilesDF$screenName[1]
+
+#Get all the tweets sent by KBS (max 3200) and store it in a JSON
+getTimeline(screen_name = BusinessSchoolsTwitterProfilesDF$screenName[4],filename = "UL_tweets.json",n=3200,oauth_folder="~/R Working Directory/Twitter/Authentication")
+#Get all the tweets sent by DCU (max 3200) and store it in a JSON
+getTimeline(screen_name = BusinessSchoolsTwitterProfilesDF$screenName[3],filename = "DCU_tweet.json",n=3200,oauth_folder="~/R Working Directory/Twitter/Authentication")
+
+#Get all the tweets sent by SmurfitSchool (max 3200) and store it in a JSON
+getTimeline(screen_name = BusinessSchoolsTwitterProfilesDF$screenName[2],filename = "SmurfitSchool_tweet.json",n=3200,oauth_folder="~/R Working Directory/Twitter/Authentication")
+
+#Get all the tweets sent by CBLUCC (max 3200) and store it in a JSON
+getTimeline(screen_name = BusinessSchoolsTwitterProfilesDF$screenName[1],filename = "CBLUCC_tweet.json",n=3200,oauth_folder="~/R Working Directory/Twitter/Authentication")
+
+#Get all the tweets sent by NUIG (max 3200) and store it in a JSON
+getTimeline(screen_name = BusinessSchoolsTwitterProfilesDF$screenName[5],filename = "NUIG_tweet.json",n=3200,oauth_folder="~/R Working Directory/Twitter/Authentication")
+}
+
+#Parse the JSON Files into dataframes that were created when GetAllTweets was last TRUE 
+KBSDF <- parseTweets("UL_tweets.json")
+DCUDF <- parseTweets("DCU_tweet.json")
+SmurfitDF <- parseTweets("SmurfitSchool_tweet.json")
+UCCDF <- parseTweets("CBLUCC_tweet.json")
+NUIGDF <- parseTweets("NUIG_tweet.json")
+
+#Convert the created_at column to a Date from a char
+KBSDF <- mutate(KBSDF,created_at = as.POSIXct(created_at, format="%a %b %d %H:%M:%S %z %Y"))
+DCUDF <- mutate(DCUDF,created_at = as.POSIXct(created_at, format="%a %b %d %H:%M:%S %z %Y"))
+SmurfitDF <- mutate(SmurfitDF,created_at = as.POSIXct(created_at, format="%a %b %d %H:%M:%S %z %Y"))
+UCCDF <- mutate(UCCDF,created_at = as.POSIXct(created_at, format="%a %b %d %H:%M:%S %z %Y"))
+NUIGDF <- mutate(NUIGDF,created_at = as.POSIXct(created_at, format="%a %b %d %H:%M:%S %z %Y"))
+
+#Get the Day of the week values for the tweets and add it to the end of the dataframe as a new column
+KBSDF <- mutate(KBSDF,created_dow = weekdays(created_at))
+DCUDF <- mutate(DCUDF,created_dow = weekdays(created_at))
+SmurfitDF <- mutate(SmurfitDF,created_dow = weekdays(created_at))
+UCCDF <- mutate(UCCDF,created_dow = weekdays(created_at))
+NUIGDF <- mutate(NUIGDF,created_dow = weekdays(created_at))
+
+
+#NEED TO IMPROVE AND CONFIRM THE CALCULATIONS HERE AS ROLLED by Hand
+#SortedDataFrame <- UCCDF[order(retweet_count) , ]
+#TheMeanRetweet <- data.frame(c(mean(UCCDF$retweet_count),mean(SmurfitDF$retweet_count),mean(DCUDF$retweet_count),mean(KBSDF$retweet_count),mean(NUIGDF$retweet_count)))
+
+#TheSDRetweet <- data.frame(c(sd(UCCDF$retweet_count),sd(SmurfitDF$retweet_count),sd(DCUDF$retweet_count),sd(KBSDF$retweet_count),sd(NUIGDF$retweet_count)))
+
+#RetweetTable <-data.frame(BusinessSchools)
+#RetweetTable <-bind_cols(RetweetTable,TheMeanRetweet,TheSDRetweet)
+#colnames(RetweetTable) <- c("School","Average Retweets","Standard Def")
+#kable(RetweetTable, digits =2)
+```
+
+```{r, echo=FALSE, warning=FALSE,message=FALSE}
+#Get the Year-Month number of tweets and plot them as a line graph
+
+
+df2 <- data.frame("Account",strftime(KBSDF$created_at, format = "%Y-%m"))
+colnames(df2) <- c("Tweeter","TimePeriod")
+KBSresult <- aggregate(df2$Tweeter, by = list(df2$TimePeriod), FUN = length)
+KBSresult <- mutate(KBSresult,Account ="BusinessAtUL")
+colnames(KBSresult) <- c("TimePeriod","Tweets","Tweeter")
+
+#Delete the temp dataframe so its safe to reuse
+rm(df2)
+
+UCCDF <- mutate(UCCDF,created_at = as.POSIXct(created_at, format="%a %b %d %H:%M:%S %z %Y"))
+df2 <- data.frame("Account",strftime(UCCDF$created_at, format = "%Y-%m"))
+colnames(df2) <- c("Tweeter","TimePeriod")
+UCCresult <- aggregate(df2$Tweeter, by = list(df2$TimePeriod), FUN = length)
+UCCresult <- mutate(UCCresult,Account ="CBLUCC")
+colnames(UCCresult) <- c("TimePeriod","Tweets","Tweeter")
+
+#Delete the temp dataframe so its safe to reuse
+rm(df2)
+
+DCUDF <- mutate(DCUDF,created_at = as.POSIXct(created_at, format="%a %b %d %H:%M:%S %z %Y"))
+df2 <- data.frame("Account",strftime(DCUDF$created_at, format = "%Y-%m"))
+colnames(df2) <- c("Tweeter","TimePeriod")
+DCUCount <- aggregate(df2$Tweeter, by = list(df2$TimePeriod), FUN = length)
+DCUCount <- mutate(DCUCount,Account ="dcubs")
+colnames(DCUCount) <- c("TimePeriod","Tweets","Tweeter")
+
+#Delete the temp dataframe so its safe to reuse
+rm(df2)
+#SmurfitSchool
+SmurfitDF <- mutate(SmurfitDF,created_at = as.POSIXct(created_at, format="%a %b %d %H:%M:%S %z %Y"))
+df2 <- data.frame("Account",strftime(SmurfitDF$created_at, format = "%Y-%m"))
+colnames(df2) <- c("Tweeter","TimePeriod")
+SmurfitCount <- aggregate(df2$Tweeter, by = list(df2$TimePeriod), FUN = length)
+SmurfitCount <- mutate(SmurfitCount,Account ="SmurfitSchool")
+colnames(SmurfitCount) <- c("TimePeriod","Tweets","Tweeter")
+
+#Delete the temp dataframe so its safe to reuse
+rm(df2)
+#NUIGSchool
+NUIGDF <- mutate(NUIGDF,created_at = as.POSIXct(created_at, format="%a %b %d %H:%M:%S %z %Y"))
+df2 <- data.frame("Account",strftime(NUIGDF$created_at, format = "%Y-%m"))
+colnames(df2) <- c("Tweeter","TimePeriod")
+NUIGCount <- aggregate(df2$Tweeter, by = list(df2$TimePeriod), FUN = length)
+NUIGCount <- mutate(NUIGCount,Account ="NUIGCairnes")
+colnames(NUIGCount) <- c("TimePeriod","Tweets","Tweeter")
+
+
+#Merging datasets together
+combined <- bind_rows(UCCresult, KBSresult,DCUCount,SmurfitCount,NUIGCount)
+#Clean up
+rm(UCCresult, KBSresult,DCUCount,SmurfitCount,NUIGCount,df2)
+```
+
+This is an introductory analysis of the twitter output of **`r BusinessSchoolsTwitterProfilesDF$name`** Business Schools and their twitter activity. A bit history of the twitter profiles is given
+
+`r paste0('![Image](', BusinessSchoolsTwitterProfilesDF$profileImageUrl, ')', collapse = '\n')`
+
+
+```{r, echo=FALSE, warning=FALSE,message=FALSE}
+#Plot the twitter activity by year-month using the Colour scheme defined earlier
+ggplot(combined, aes(x = TimePeriod, y = Tweets, group = Tweeter, color = Tweeter)) + geom_line(size = 1)  + scale_color_manual(values = MyColours)+ theme(axis.text.x = element_text(angle = 90, vjust = 0.5, hjust=1))
+```
+
+
+```{r, echo=FALSE, warning=FALSE,message=FALSE}
+#Rename columns to be more readable 
+if (GetTwitterOverView){
+names(BusinessSchoolsTwitterProfilesDF)[names(BusinessSchoolsTwitterProfilesDF)=="listedCount"] <- "ListedBy"
+names(BusinessSchoolsTwitterProfilesDF)[names(BusinessSchoolsTwitterProfilesDF)=="statusesCount"] <- "TweetsRetweets"
+names(BusinessSchoolsTwitterProfilesDF)[names(BusinessSchoolsTwitterProfilesDF)=="friendsCount"] <- "IsFollowing"
+names(BusinessSchoolsTwitterProfilesDF)[names(BusinessSchoolsTwitterProfilesDF)=="followersCount"] <- "FollowedBy"
+}
+#Create a layout so 1 plot in row 1 and two figures in row 2 then call the plots in the order you want them filled
+layout(matrix(c(1,1,2,3), 2, 2, byrow = TRUE))
+
+#BarPlot tweets and colour using the colours picked earlier
+barplot(BusinessSchoolsTwitterProfilesDF$TweetsRetweets, main="Twitter Account Activity / Tweets Retweets",col=MyColours,legend=c(BusinessSchoolsTwitterProfilesDF$screenName))
+
+#BarPlot Followers
+barplot(BusinessSchoolsTwitterProfilesDF$FollowedBy, main="Twitter Followers",names.arg=c(BusinessSchoolsTwitterProfilesDF$screenName),col=MyColours)
+
+#BarPlot Following
+tempplot <- barplot(BusinessSchoolsTwitterProfilesDF$IsFollowing, main="Are Followering",names.arg=c(BusinessSchoolsTwitterProfilesDF$screenName),col=MyColours)
+text(x = tempplot, y = BusinessSchoolsTwitterProfilesDF$IsFollowing, label = BusinessSchoolsTwitterProfilesDF$IsFollowing, pos = 3, cex = 0.8, col = "navy")
+
+#Restore layout to normal
+par(par_orig)
+```
+
+#Tweeting Activity
+The plots below indicate the days of the week when each account is sending out tweets. The majority of activity is during the work week but some activity is recorded at weekends with DCU showing the most activity of Saturday and Sunday.
+
+```{r, echo=FALSE, warning=FALSE,message=FALSE}
+#Organise the layout with 3 plots on the top row and 2 below
+layout(mat = matrix(c(1,1,2,2,3,3,0,4,4,5,5,0), nrow = 2, byrow = TRUE))
+#layout.show(5) use this to give an idea of the layout if you want to see what its like before plotting
+# Plot a pie chart after getting the number of times each day appears
+pie(table(KBSDF$created_dow), col =rainbow(7), main ="Tweeting Days for KBS")
+pie(table(DCUDF$created_dow), col =rainbow(7), main ="Tweeting Days for DCU")
+pie(table(SmurfitDF$created_dow), col =rainbow(7), main ="Tweeting Days for Smurfit")
+pie(table(UCCDF$created_dow), col =rainbow(7), main ="Tweeting Days for UCC")
+pie(table(NUIGDF$created_dow), col =rainbow(7), main ="Tweeting Days for NUIG")
+#Restore layout to normal
+par(par_orig)
+
+```
+
+#Hash-Tags
+In order to engage with the wider twitter communities and expand the reach of their message beyond followers its important to associate tweets with appropriate "hast-tags" so lets investigate the use of hash-tags a bit further. As we can see from the pie charts KBS is behind the other institutions when it comes to including tags in their messages but no institution is including tags in more than half their public messages.
+
+```{r, echo=FALSE, warning=FALSE,message=FALSE}
+#Extract the Hashtags from the text
+KBStags <-rm_hash(KBSDF$text, extract=TRUE, clean=TRUE, trim=TRUE)
+DCUtags <- rm_hash(DCUDF$text, extract=TRUE, clean=TRUE, trim=TRUE)
+Smurfittags <- rm_hash(SmurfitDF$text, extract=TRUE, clean=TRUE, trim=TRUE)
+UCCtags <- rm_hash(UCCDF$text, extract=TRUE, clean=TRUE, trim=TRUE)
+NUIGtags <- rm_hash(NUIGDF$text, extract=TRUE, clean=TRUE, trim=TRUE)
+```
+
+```{r, echo=FALSE, warning=FALSE,message=FALSE}
+#Get the number of messages with and without tags
+#Number of tweets found with 1 or more hashtags
+PrecentUL <- (length(KBStags)-(sum(is.na(KBStags))))
+# Add the number of tweets without hastags to the vector PrecentUL
+PrecentUL <- c(PrecentUL,sum(is.na(KBStags)))
+#DCU
+PrecentDCU <- (length(DCUtags)-(sum(is.na(DCUtags))))
+# Add the number of tweets without hastags to the vector PrecentUL
+PrecentDCU <- c(PrecentDCU,sum(is.na(DCUtags)))
+#Smurfit
+PrecentSmurf <- (length(Smurfittags)-(sum(is.na(Smurfittags))))
+# Add the number of tweets without hastags to the vector PrecentUL
+PrecentSmurf <- c(PrecentSmurf,sum(is.na(Smurfittags)))
+#UCC
+PrecentUCC <- (length(UCCtags)-(sum(is.na(UCCtags))))
+# Add the number of tweets without hastags to the vector PrecentUL
+PrecentUCC <- c(PrecentUCC,sum(is.na(UCCtags)))
+#NUIG
+PrecentNUIG <- (length(NUIGtags)-(sum(is.na(NUIGtags))))
+# Add the number of tweets without hastags to the vector PrecentUL
+PrecentNUIG <- c(PrecentNUIG,sum(is.na(NUIGtags)))
+#Plot it as a Pie Chart
+#Organise the layout with 3 plots on the top row and 2 below
+layout(mat = matrix(c(1,1,2,2,3,3,0,4,4,5,5,0), nrow = 2, byrow = TRUE))
+pie(PrecentUL, col=c("green","red"), labels=c("Tagged","No Tags"), main="KBS Total Tweets")
+pie(PrecentDCU, col=c("green","red"), labels=c("Tagged","No Tags"), main=" DCU Total Tweets")
+pie(PrecentSmurf, col=c("green","red"), labels=c("Tagged","No Tags"), main="Smurfit Total Tweets")
+pie(PrecentUCC, col=c("green","red"), labels=c("Tagged","No Tags"), main="UCC Total Tweets")
+pie(PrecentNUIG, col=c("green","red"), labels=c("Tagged","No Tags"), main="NUIG Total Tweets")
+#Restore layout to normal
+par(par_orig)
+```
+
+Of the tags that are used how varied and what topics to they cover? Lets visualise the tags in a word-cloud based on their frequency of use by each institution. 
+```{r, echo=FALSE, warning=FALSE,message=FALSE}
+#Build the corpus and term document matrix and get the frequency of each occurance
+
+#Convert each tag dataframe single listing of 1 tag per line 
+hashtags <- stringr::str_trim(unlist(KBStags),c("both"))
+#Remove the NULL values
+hashtags <-na.omit(hashtags)
+#Create the corpus after converting the hashtags to a character datatype
+hashtags <- as.character(hashtags)
+UL_corpus = Corpus(VectorSource(hashtags))
+
+#Convert each tag dataframe single listing of 1 tag per line 
+hashtags <- stringr::str_trim(unlist(DCUtags),c("both"))
+#Remove the NULL values
+hashtags <-na.omit(hashtags)
+#Create the corpus after converting the hashtags to a character datatype
+hashtags <- as.character(hashtags)
+DCU_corpus = Corpus(VectorSource(hashtags))
+
+#Convert each tag dataframe single listing of 1 tag per line 
+hashtags <- stringr::str_trim(unlist(Smurfittags),c("both"))
+#Remove the NULL values
+hashtags <-na.omit(hashtags)
+#Create the corpus after converting the hashtags to a character datatype
+hashtags <- as.character(hashtags)
+Smurf_corpus = Corpus(VectorSource(hashtags))
+
+#Convert each tag dataframe single listing of 1 tag per line 
+hashtags <- stringr::str_trim(unlist(UCCtags),c("both"))
+#Remove the NULL values
+hashtags <-na.omit(hashtags)
+#Create the corpus after converting the hashtags to a character datatype
+hashtags <- as.character(hashtags)
+UCC_corpus = Corpus(VectorSource(hashtags))
+
+#Convert each tag dataframe single listing of 1 tag per line 
+hashtags <- stringr::str_trim(unlist(NUIGtags),c("both"))
+#Remove the NULL values
+hashtags <-na.omit(hashtags)
+#Create the corpus after converting the hashtags to a character datatype
+hashtags <- as.character(hashtags)
+NUIG_corpus = Corpus(VectorSource(hashtags))
+
+# Create a Term Document Matrix but leave in the hashtag and none english words 
+UL_tdm = TermDocumentMatrix(UL_corpus,control = list(removeNumbers = FALSE))
+DCU_tdm = TermDocumentMatrix(DCU_corpus,control = list(removeNumbers = FALSE))
+Smurf_tdm = TermDocumentMatrix(Smurf_corpus,control = list(removeNumbers = FALSE))
+UCC_tdm = TermDocumentMatrix(UCC_corpus,control = list(removeNumbers = FALSE))
+NUIG_tdm = TermDocumentMatrix(NUIG_corpus,control = list(removeNumbers = FALSE))
+
+#Convert each to a matrix
+ULMatrix <- as.matrix(UL_tdm)
+DCUMatrix <- as.matrix(DCU_tdm)
+SmurfMatrix <- as.matrix(Smurf_tdm)
+UCCMatrix <- as.matrix(UCC_tdm)
+NUIGMatrix <- as.matrix(NUIG_tdm)
+
+#Get the frequency of the words
+ULword_freqs = sort(rowSums(ULMatrix), decreasing=TRUE) 
+DCUword_freqs = sort(rowSums(DCUMatrix), decreasing=TRUE)
+Smurfword_freqs = sort(rowSums(SmurfMatrix), decreasing=TRUE)
+UCCword_freqs = sort(rowSums(UCCMatrix), decreasing=TRUE)
+NUIGword_freqs = sort(rowSums(NUIGMatrix), decreasing=TRUE)
+
+#Convert each to a dataframe
+ULTagCloudDF <- data.frame(word=names(ULword_freqs), freq=ULword_freqs)
+DCUTagCloudDF <- data.frame(word=names(DCUword_freqs), freq=DCUword_freqs)
+SmurfTagCloudDF <- data.frame(word=names(Smurfword_freqs), freq=Smurfword_freqs)
+UCCTagCloudDF <- data.frame(word=names(UCCword_freqs), freq=UCCword_freqs)
+NUIGTagCloudDF <- data.frame(word=names(NUIGword_freqs), freq=NUIGword_freqs)
+```
+
+From left to right the tag clouds are KBS, DCU,Smurfit,UCC and NUIG. A common feature appears to be the use of regional tags and CAO related values. The most frequent KBS tags appear to be targeted at the institution itself instead of expanding the reach to more general business related discussions. This is contract to the Smurfit school where the most frequent tags include the #mba #scholarship and #education
+```{r, echo=FALSE, warning=FALSE,message=FALSE}
+#Print the hasttag wordclouds
+#Organise the layout with 3 plots on the top row and 2 below
+layout(mat = matrix(c(1,1,2,2,3,3,0,4,4,5,5,0), nrow = 2, byrow = TRUE))
+#WordCloud where the min frequency is 1
+wordcloud(ULTagCloudDF$word, ULTagCloudDF$freq,min.freq =1, random.order=FALSE, colors=brewer.pal(8, "Dark2")) 
+wordcloud(DCUTagCloudDF$word, DCUTagCloudDF$freq,min.freq =1, random.order=FALSE, colors=brewer.pal(8, "Dark2"))
+wordcloud(SmurfTagCloudDF$word, SmurfTagCloudDF$freq,min.freq =1, random.order=FALSE, colors=brewer.pal(8, "Dark2"))
+wordcloud(UCCTagCloudDF$word, UCCTagCloudDF$freq,min.freq =1, random.order=FALSE, colors=brewer.pal(8, "Dark2"))
+wordcloud(NUIGTagCloudDF$word, NUIGTagCloudDF$freq,min.freq =1, random.order=FALSE, colors=brewer.pal(8, "Dark2"))
+#Restore layout to normal
+par(par_orig)
+```
+
+#Message Body
+Finally lets turn to the contents of the tweets themselves and see what we can understand from the words used in the message body.
+
+```{r, echo=FALSE, warning=FALSE,message=FALSE}
+#Clean up the tweet text to find the common words used
+#Remove the hashtags from the text using the qdapRegex package and converting the text to utf8 encoding first
+JustText <- rm_hash(iconv(KBSDF$text, to='UTF-8', sub='byte'), clean=TRUE, trim=TRUE)
+#Remove the twitter shortened urls
+JustTextNoShortURL <-rm_twitter_url(JustText, trim = TRUE, clean = TRUE,extract = FALSE)
+#Convert it to a corpus
+UL_TextCorpus = Corpus(VectorSource(JustTextNoShortURL))
+
+#DCU
+rm(JustText)
+rm(JustTextNoShortURL)
+JustText <- rm_hash(iconv(DCUDF$text, to='UTF-8', sub='byte'), clean=TRUE, trim=TRUE)
+#Remove the twitter shortened urls
+JustTextNoShortURL <-rm_twitter_url(JustText, trim = TRUE, clean = TRUE,extract = FALSE)
+#Convert it to a corpus
+DCU_TextCorpus = Corpus(VectorSource(JustTextNoShortURL))
+
+#Smurfit
+rm(JustText)
+rm(JustTextNoShortURL)
+JustText <- rm_hash(iconv(SmurfitDF$text, to='UTF-8', sub='byte'), clean=TRUE, trim=TRUE)
+#Remove the twitter shortened urls
+JustTextNoShortURL <-rm_twitter_url(JustText, trim = TRUE, clean = TRUE,extract = FALSE)
+#Convert it to a corpus
+Smurf_TextCorpus = Corpus(VectorSource(JustTextNoShortURL))
+
+#UCC
+rm(JustText)
+rm(JustTextNoShortURL)
+JustText <- rm_hash(iconv(UCCDF$text, to='UTF-8', sub='byte'), clean=TRUE, trim=TRUE)
+#Remove the twitter shortened urls
+JustTextNoShortURL <-rm_twitter_url(JustText, trim = TRUE, clean = TRUE,extract = FALSE)
+#Convert it to a corpus
+UCC_TextCorpus = Corpus(VectorSource(JustTextNoShortURL))
+
+#NUIG
+rm(JustText)
+rm(JustTextNoShortURL)
+JustText <- rm_hash(iconv(NUIGDF$text, to='UTF-8', sub='byte'), clean=TRUE, trim=TRUE)
+#Remove the twitter shortened urls
+JustTextNoShortURL <-rm_twitter_url(JustText, trim = TRUE, clean = TRUE,extract = FALSE)
+#Convert it to a corpus
+NUIG_TextCorpus = Corpus(VectorSource(JustTextNoShortURL))
+
+#UL
+#Create a term document matrix as above but also exclude "and" "the""for" i.e anything defined in AnalysisStopWords
+TextTDM = TermDocumentMatrix(UL_TextCorpus,control = list(removePunctuation =TRUE,stopwords("english"),stopwords = AnalysisStopWords,removeNumbers = FALSE))
+#Convert it to a Matrix
+ULTextMatrix <- as.matrix(TextTDM)
+#DCU
+rm(TextTDM)
+#Create a term document matrix as above but also exclude "and" "the""for" i.e anything defined in AnalysisStopWords
+TextTDM = TermDocumentMatrix(DCU_TextCorpus,control = list(removePunctuation =TRUE,stopwords("english"),stopwords = AnalysisStopWords,removeNumbers = FALSE))
+#Convert it to a Matrix
+DCUTextMatrix <- as.matrix(TextTDM)
+#Smurfit
+rm(TextTDM)
+#Create a term document matrix as above but also exclude "and" "the""for" i.e anything defined in AnalysisStopWords
+TextTDM = TermDocumentMatrix(Smurf_TextCorpus,control = list(removePunctuation =TRUE,stopwords("english"),stopwords = AnalysisStopWords,removeNumbers = FALSE))
+#Convert it to a Matrix
+SmurfTextMatrix <- as.matrix(TextTDM)
+#UCC
+rm(TextTDM)
+#Create a term document matrix as above but also exclude "and" "the""for" i.e anything defined in AnalysisStopWords
+TextTDM = TermDocumentMatrix(UCC_TextCorpus,control = list(removePunctuation =TRUE,stopwords("english"),stopwords = AnalysisStopWords,removeNumbers = FALSE))
+#Convert it to a Matrix
+UCCTextMatrix <- as.matrix(TextTDM)
+#NUIG
+rm(TextTDM)
+#Create a term document matrix as above but also exclude "and" "the""for" i.e anything defined in AnalysisStopWords
+TextTDM = TermDocumentMatrix(NUIG_TextCorpus,control = list(removePunctuation =TRUE,stopwords("english"),stopwords = AnalysisStopWords,removeNumbers = FALSE))
+#Convert it to a Matrix
+NUIGTextMatrix <- as.matrix(TextTDM)
+
+
+#Get the frequency of the words
+ULWord_freqs = sort(rowSums(ULTextMatrix), decreasing=TRUE) 
+DCUWord_freqs = sort(rowSums(DCUTextMatrix), decreasing=TRUE)
+SmurWord_freqs = sort(rowSums(SmurfTextMatrix), decreasing=TRUE)
+UCCWord_freqs = sort(rowSums(UCCTextMatrix), decreasing=TRUE)
+NUIGWord_freqs = sort(rowSums(NUIGTextMatrix), decreasing=TRUE)
+
+#Convert it to a dataframe
+ULDF <- data.frame(word=names(ULWord_freqs), freq=ULWord_freqs)
+#Convert it into a more suitable layout
+ULDF.melt <- melt(data = ULDF)
+#Rename the value to include the twitter handle
+ULDF.melt$variable ="KBS"
+
+#DCU
+DCUDF <- data.frame(word=names(DCUWord_freqs), freq=DCUWord_freqs)
+#Convert it into a more suitable layout
+DCUDF.melt <- melt(data = DCUDF)
+#Rename the value to include the twitter handle
+DCUDF.melt$variable ="DCU"
+
+#Smurfit
+SmurfDF <- data.frame(word=names(SmurWord_freqs), freq=SmurWord_freqs)
+#Convert it into a more suitable layout
+SmurfDF.melt <- melt(data = SmurfDF)
+#Rename the value to include the twitter handle
+SmurfDF.melt$variable ="Smurfit"
+
+#UCC
+UCCDF <- data.frame(word=names(UCCWord_freqs), freq=UCCWord_freqs)
+#Convert it into a more suitable layout
+UCCDF.melt <- melt(data = UCCDF)
+#Rename the value to include the twitter handle
+UCCDF.melt$variable ="UCC"
+
+#NUIG
+NUIGDF <- data.frame(word=names(NUIGWord_freqs), freq=NUIGWord_freqs)
+#Convert it into a more suitable layout
+NUIGDF.melt <- melt(data = NUIGDF)
+#Rename the value to include the twitter handle
+NUIGDF.melt$variable ="NUIG"
+
+#Combine dataframes together by taking the top KeyWordFrequency as defined earlier
+CombinedList <- rbind(top_n(ULDF.melt,KeyWordFrequency,ULDF.melt$value),top_n(DCUDF.melt,KeyWordFrequency,DCUDF.melt$value),top_n(SmurfDF.melt,KeyWordFrequency,SmurfDF.melt$value),top_n(UCCDF.melt,KeyWordFrequency,UCCDF.melt$value),top_n(NUIGDF.melt,KeyWordFrequency,NUIGDF.melt$value))
+```
+#Top`KeyWordFrequency` keywords in tweets
+
+```{r, echo=FALSE, warning=FALSE,message=FALSE}
+#Create the graph
+#Create a graph but only include those words with frequency greater than 100
+subgraph <- graph.data.frame(CombinedList,directed=TRUE)
+# I think this assigns the frequencies to the graph weights
+subgraph$weight <- CombinedList$value
+#Try to get a nice layout
+#plot(layout_with_kk(subgraph), edge.width =E(subgraph)$weight)
+# plot the graph with the edge.width using the graph weight aka the word frequency
+plot(subgraph, edge.width =E(subgraph)$weight)
+tkplot(subgraph)
+```
+
+#Conclusions

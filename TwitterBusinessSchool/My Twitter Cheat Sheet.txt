@@ -1,0 +1,194 @@
+For streaming twitter http://cran.us.r-project.org/web/packages/streamR/streamR.pdf
+
+For parsing hashtags from messages https://sites.google.com/site/miningtwitter/questions/user-tweets/contain-hashtags 
+
+@CBLUCC UCC Business and Law
+@SmurfitSchool UCD Smurfit Business School
+@dcubs DCU Business School
+@BusinessAtUL Kemmy Business ( But why no mention in the twitter handle [inconsistent use of Kemmy]
+@NUIGCairnes NUIG Cairnes School of Business
+
+Sys.sleep(time)
+
+ColourValues
+UCC = #FFB500
+SmurfitSchool = #0080FF
+DCU = #002566
+UL = #70193D
+NUIG = #7EA996
+
+#Assign Colours to a variable using the official Uni colours where possible
+MyColours <- c("#FFB500","#0080FF","#002566","#70193D","#7EA996")
+
+#Authenticate and Query twitter using twitteR
+library(twitteR)
+
+api_key <- "DRpic1VCPPKaus47iH76IO1sY"
+api_secret <- "1OGCdLEsVul8QbFdt4ISaddn2ZRuSgFDfwin5XhNeKAmSURC8g"
+access_token <- "3350763981-2WQuYaElknBvLMco2VDbeP37AFT6bo0WBjMotbh"
+access_secret <- "AugUsNliEBAdYhkRqdQ4G0fQTHYZLzcRJi6wOT2QJfByV"
+
+setup_twitter_oauth(api_key,api_secret,access_token,access_secret)
+
+#Get the tweets for a user
+Alltweets = userTimeline("@BusinessAtUL", n=3200)
+#Convert it to a dataframe
+AllBusDF <-twListToDF(Alltweets)
+
+#Gets alot of useful details about the users and converts into a dataframe
+BusinessSchools <- c("CBLUCC","SmurfitSchool","dcubs","BusinessAtUL","NUIGCairnes")
+AllBusinessSchools <- lookupUsers(BusinessSchools)
+AllBusDF <-twListToDF(AllBusinessSchools)
+
+#mean and standard dev
+mean(dfWithWeekday$retweetCount)
+sd(dfWithWeekday$retweetCount)
+
+#Rename columns to be more readable (BUT THIS should NOT BE DONE TO AVOID PROBLEMS REFERENCING THEM IN CODE
+names(AllBusDF)[names(AllBusDF)=="listedCount"] <- "ListedBy"
+names(AllBusDF)[names(AllBusDF)=="statusesCount"] <- "TweetsRetweets"
+names(AllBusDF)[names(AllBusDF)=="friendsCount"] <- "IsFollowing"
+names(AllBusDF)[names(AllBusDF)=="followersCount"] <- "FollowedBy"
+
+#Create a layout so 1 plot in row 1 and two figures in row 2 then call the plots in the order you want them filled
+layout(matrix(c(1,1,2,3), 2, 2, byrow = TRUE))
+
+#BarPlot tweets and colour using the colours picked earlier
+barplot(AllBusDF$TweetsRetweets, main="Twitter Account Activity / Tweets Retweets",col=MyColours,legend=c(AllBusDF$screenName)
+
+#BarPlot Followers
+barplot(AllBusDF$FollowedBy, main="Twitter Followers",names.arg=c(AllBusDF$screenName),col=MyColours)
+
+#BarPlot Following
+barplot(AllBusDF$IsFollowing, main="Are Followering",names.arg=c(AllBusDF$screenName),col=MyColours)
+
+#Get the favourites for each specific user although this might be more useful later
+ULBusinessFavs <- favorites("BusinessAtUL", n = 20)
+SmmurfitFavs <- favorites("SmurfitSchool", n =20)
+
+#BarPlot with labels requires you to store the plot first then pass it into the text function as the x argument 
+tempplot <- barplot(AllBusDF$IsFollowing, main="Are Followering",names.arg=c(AllBusDF$screenName),col=MyColours)
+text(x = tempplot, y = AllBusDF$IsFollowing, label = AllBusDF$IsFollowing, pos = 3, cex = 0.8, col = "navy")
+
+# Get Twitter Timelines
+
+#Get all the tweets sent by KBS (max 3200) and store it in a JSON
+library(smappR)
+getTimeline(screen_name = "BusinessAtUL",filename = "UL_tweets.json",n=3200,oauth_folder="~/R Working Directory/Twitter")
+#Parse it into a dataframe
+KBSDF <- parseTweets("UL_tweets.json")
+
+
+
+#Get the day of the week the tweet was created after changing it from char to date dataType and append it to the dataframe
+KBSDF <- mutate(KBSDF,created_at = as.POSIXct(created_at, format="%a %b %d %H:%M:%S %z %Y"))
+KBSDF <- mutate(KBSDF,created_dow = weekdays(created_at)))
+
+
+
+# Plot a pie chart after getting the number of times each day appears
+pie(table(dfWithWeekday$created_dow), col =rainbow(7), main =c("Tweeting Days for ",unique(dfWithWeekday$screenName)))
+# Plots the time series stored in created (might be possible to combine time series from all accounts into 1 plot
+plot.zoo(zoo(SmurFavdf$created))
+#THIS USES THE smappnyu package and a basic plot to plot dcu as a line with its colour
+plot(DCUDF$created_at, breaks="days", type="l", col=MyColours[3], ylab="DCU")
+
+#Use package qdapRegex to pull hashtags from text
+hashtags <-rm_hash(dfWithWeekday$text, extract=TRUE, clean=TRUE, trim=TRUE)
+#Count the number of tweets where no hashtag was used
+sum(is.na(hashtags))
+#Get the number of total tweets 
+length(hashtags)
+#Number of tweets found with 1 or more hashtags
+PrecentUL <- (length(hashtags)-(sum(is.na(hashtags))))
+# Add the number of tweets without hastags to the vector PrecentUL
+PrecentUL <- c(PrecentUL,sum(is.na(hashtags)))
+#Plot it as a Pie Chart
+pie(PrecentUL, col=c("green","red"), labels=c("Contains Tags","No Tags"), main="Engaging in Social Media")
+
+
+
+#Convert it into single listing of 1 tag per line 
+hashtags <- stringr::str_trim(unlist(hashtags),c("both"))
+#Remove the NULL values
+hashtags <-na.omit(hashtags)
+
+#Create the corpus after loading the library and converting the hashtags to a character datatype
+library(tm)
+hashtags <- as.character(hashtags)
+UL_corpus = Corpus(VectorSource(hashtags))
+# Create a Term Document Matrix but leave in the hashtag and none english words 
+tdm = TermDocumentMatrix(UL_corpus,control = list(removeNumbers = FALSE))
+# Or Create a Term Document Matrix after cleaning up the Corpus 
+tdm = TermDocumentMatrix(UL_corpus,control = list(removePunctuation =TRUE,stopwords("english"),removeNumbers = FALSE))
+
+#Convert it to a matrix
+ULMatrix <- as.matrix(tdm)
+#Get the frequency of the words
+word_freqs = sort(rowSums(ULMatrix), decreasing=TRUE) 
+#Convert it to a dataframe
+cloudDF <- data.frame(word=names(word_freqs), freq=word_freqs)
+# Load the library and print the wordcloud
+library(wordcloud)
+wordcloud(cloudDF$word, cloudDF$freq, random.order=FALSE, colors=brewer.pal(8, "Dark2"))
+#WordCloud where the min frequency is 1
+wordcloud(cloudDF$word, cloudDF$freq,min.freq =1, random.order=FALSE, colors=brewer.pal(8, "Dark2"))
+
+
+#Clean up the tweet text to find the common words used
+#Remove the hashtags from the text using the qdapRegex package and converting the text to utf8 encoding first
+JustText <- rm_hash(iconv(KBSDF$text, to='UTF-8', sub='byte'), clean=TRUE, trim=TRUE)
+#Remove the twitter shortened urls
+JustTextNoShortURL <-rm_twitter_url(JustText, trim = TRUE, clean = TRUE,extract = FALSE)
+#Convert it to a corpus
+UL_TextCorpus = Corpus(VectorSource(JustTextNoShortURL))
+#Create a Term Document Matrix but remove the Punctuation and might be worth removing English stop words
+TextTDM = TermDocumentMatrix(UL_TextCorpus,control = list(removePunctuation =TRUE,stopwords("english"),removeNumbers = FALSE))
+#Or create a term document matrix as above but also exclude "and""the""for" 
+TextTDM = TermDocumentMatrix(UL_TextCorpus,control = list(removePunctuation =TRUE,stopwords("english"),stopwords =c("the","for","and","any","our","very","has","this","are","all","out","did","from","with","have","who","take","some","its","here","one","heres"),removeNumbers = FALSE))
+#Convert it to a Matrix
+ULTextMatrix <- as.matrix(TextTDM)
+#Get the frequency of the words
+MainWord_freqs = sort(rowSums(ULTextMatrix), decreasing=TRUE) 
+#Convert it to a dataframe
+TextDF <- data.frame(word=names(MainWord_freqs), freq=MainWord_freqs)
+#Convert it into a more suitable layout
+TextDF.melt <- melt(data = TextDF)
+#Rename the value to include the twitter handle
+TextDF.melt$variable ="@BusinessAtUL"
+Create a graph but only include those words with frequency greater than 10
+subgraph <- graph.data.frame(filter(TextDF.melt,TextDF.melt$value >=10),directed=TRUE)
+# I think this assigns the frequencies to the graph weights
+subgraph$weight <- TextDF.melt$value
+# plot the graph with the edge.width using the graph weight aka the word frequency
+plot(subgraph, edge.width =E(subgraph)$weight)
+
+
+Combine 2 dataframes together so they become 1 dataframe with all the contents of both (NOT SURE ABOUT THIS)
+CombinedList <- rbind(temp, NUIG.melt)
+
+
+TODO
+For twitter in twitterlist
+get number of tweets, favourites, followers, following
+What day  are most popular for sending tweets (pie chart)
+Time series (not great but is possible and could combine them into 1 plot with a series for each)
+
+get the number and value of hashtags used and compare against the number of tweets sent without any
+graph the network as it relates to users to show common users
+graph the network to show key interactions between accounts (strong links, vertices between sender and receiver)
+create word cloud of the tags and the contents of tweets and see which ones are missing in UL's account
+Get the sentiment of the tweets for each sender
+
+
+
+library(twitteR)
+api_key <- "DRpic1VCPPKaus47iH76IO1sY"
+api_secret <- "1OGCdLEsVul8QbFdt4ISaddn2ZRuSgFDfwin5XhNeKAmSURC8g"
+access_token <- "3350763981-2WQuYaElknBvLMco2VDbeP37AFT6bo0WBjMotbh"
+access_secret <- "AugUsNliEBAdYhkRqdQ4G0fQTHYZLzcRJi6wOT2QJfByV"
+
+setup_twitter_oauth(api_key,api_secret,access_token,access_secret)
+
+
+
