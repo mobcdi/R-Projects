@@ -23,10 +23,10 @@ MyColours <- c("#FFB500","#0080FF","#002566","#70193D","#7EA996")
 #Authenticate and Query twitter using twitteR
 library(twitteR)
 
-api_key <- "DRpic1VCPPKaus47iH76IO1sY"
-api_secret <- "1OGCdLEsVul8QbFdt4ISaddn2ZRuSgFDfwin5XhNeKAmSURC8g"
-access_token <- "3350763981-2WQuYaElknBvLMco2VDbeP37AFT6bo0WBjMotbh"
-access_secret <- "AugUsNliEBAdYhkRqdQ4G0fQTHYZLzcRJi6wOT2QJfByV"
+api_key <- ""
+api_secret <- ""
+access_token <- ""
+access_secret <- ""
 
 setup_twitter_oauth(api_key,api_secret,access_token,access_secret)
 
